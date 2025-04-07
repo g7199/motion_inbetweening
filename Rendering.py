@@ -5,7 +5,6 @@ from utils import draw_colored_cube, draw_colored_sphere, bone_rotation, draw_ar
 
 joint_size = 3
 
-
 #OpenGL_accelerate 사용하면 numpy로 변환해줘야함.
 def glm_mat4_to_glf(m: glm.mat4) -> np.ndarray:
     return np.array(m.to_list(), dtype=np.float32).flatten()

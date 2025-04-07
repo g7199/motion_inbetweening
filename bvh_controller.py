@@ -223,25 +223,28 @@ def connect(motion1, motion2, transition_frames=100, start_index_m2=3):
 
     p1 = last_frame_m1.joint_positions["VirtualRoot"]
     p2 = first_frame_m2.joint_positions["VirtualRoot"]
-    position_offset = p1 - p2
 
     r1 = last_frame_m1.joint_rotations["VirtualRoot"]
     r2 = first_frame_m2.joint_rotations["VirtualRoot"]
     rotation_offset = r1 * glm.conjugate(r2)
+    position_offset = p1 - rotation_offset * p2
 
     # 2. motion2 복사본 생성 + VirtualRoot offset 적용
     adjusted_motion2 = []
-    for frame in motion2.quaternion_frames:
+
+    for i, frame in enumerate(motion2.quaternion_frames):
         new_frame = MotionFrame()
+        apply_offset = (i >= start_index_m2)  # start_index_m2부터만 offset 적용
+
         for joint_name, quat in frame.joint_rotations.items():
-            if joint_name == "VirtualRoot":
+            if joint_name == "VirtualRoot" and apply_offset:
                 new_frame.joint_rotations[joint_name] = rotation_offset * quat
             else:
                 new_frame.joint_rotations[joint_name] = quat
 
         for joint_name, pos in frame.joint_positions.items():
-            if joint_name == "VirtualRoot":
-                new_frame.joint_positions[joint_name] = pos + position_offset
+            if joint_name == "VirtualRoot" and apply_offset:
+                new_frame.joint_positions[joint_name] = rotation_offset * pos + position_offset
             else:
                 new_frame.joint_positions[joint_name] = pos
 
