@@ -1,5 +1,7 @@
 __pycache__/
-bvh
+bvh/
 .idea/
 imgui.ini
 .DS_Store
+output/
+100STYLE/

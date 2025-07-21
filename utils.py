@@ -178,7 +178,7 @@ def rotation_between_vectors(v1, v2):
 
     rotation_axis = glm.cross(v1, v2)
     s = glm.sqrt((1 + cos_theta) * 2)
-    invs = 1 / s
+    invs = 1 / (s + 1e-9)
     return glm.quat(s * 0.5,
                     rotation_axis.x * invs,
                     rotation_axis.y * invs,
@@ -195,6 +195,7 @@ def bone_rotation(forward):
     if glm.length2(glm.cross(originalDir, forward)) < 1e-6:
         if glm.dot(originalDir, forward) < 0:
             rot = glm.angleAxis(glm.pi(), glm.vec3(0, 1, 0))
+            rot = glm.angleAxis(glm.pi(), glm.vec3(1, 0, 0))
         else:
             rot = glm.quat(1, 0, 0, 0)
     else:
