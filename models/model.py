@@ -6,7 +6,7 @@ from models.utils import sinusoidal_encoding
 
 class MotionTransformer(nn.Module):
     def __init__(self, feature_dim=171, latent_dim=256, num_layers=8, ff_size=1024, nhead=4, dropout=0.1, activation="gelu"):
-        
+        super().__init__()
         self.feature_dim=feature_dim
         self.latent_dim = latent_dim
 
@@ -22,7 +22,8 @@ class MotionTransformer(nn.Module):
                                                               nhead=self.num_heads,
                                                               dim_feedforward=self.ff_size,
                                                               dropout=self.dropout,
-                                                              activation=self.activation)
+                                                              activation=self.activation,
+                                                              batch_first=True)
 
         self.seqTransEncoder = nn.TransformerEncoder(seqTransEncoderLayer,
                                                          num_layers=self.num_layers)
@@ -47,7 +48,7 @@ class MotionTransformer(nn.Module):
         x_pos = self.pos_enc(x_proj)
 
         time_vector = sinusoidal_encoding(t, self.latent_dim)
-        time_embedding = self.time_embed(time_vector)
+        time_embedding = self.time_emb(time_vector)
 
         x_final = x_pos + time_embedding.unsqueeze(1)
 

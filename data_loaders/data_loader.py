@@ -11,6 +11,7 @@ class MotionClipDataset(Dataset):
     def __init__(self, bvh_dir, clip_length=180, feat_bias=5.0):
         self.clip_length = clip_length
         self.bvh_files = glob.glob(f"{bvh_dir}/*/*.bvh")
+        print(f"Found {len(self.bvh_files)} BVH files in {bvh_dir}")
         self.mean = np.load('data/mean.npy')
         self.std = np.load('data/std.npy')+ 1e-8
         self.std[:3] /= feat_bias
@@ -30,7 +31,7 @@ class MotionClipDataset(Dataset):
         self.len = total_frames
 
     def __len__(self):
-        return self.len
+        return int(self.len)
 
     def __getitem__(self, idx):
         file_idx = np.searchsorted(self.cum_frame_lens, idx, side='right')
