@@ -1,5 +1,5 @@
 from pyglm import glm
-from virtual_transforms import get_pelvis_virtual, get_pelvis_virtual_safe
+from bvh_tools.virtual_transforms import get_pelvis_virtual_safe
 import math
 import numpy as np
 

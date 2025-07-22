@@ -166,15 +166,20 @@ def set_lights():
 
 
 def rotation_between_vectors(v1, v2):
-    """
-    vector v1과 v2 사이의 회전값을 구하는 함수입니다.
-    :param v1: 벡터 1
-    :param v2: 벡터 2
-    :return: 두 벡터 사이의 회전 행렬
-    """
+
     v1 = glm.normalize(v1)
     v2 = glm.normalize(v2)
     cos_theta = glm.dot(v1, v2)
+
+    # ★★★★★ 180도 회전 예외 처리 추가 ★★★★★
+    if cos_theta < -0.99999:
+        rotation_axis = glm.cross(glm.vec3(1.0, 0.0, 0.0), v1)
+        if glm.length2(rotation_axis) < 1e-6:
+            rotation_axis = glm.cross(glm.vec3(0.0, 1.0, 0.0), v1)
+        
+        rotation_axis = glm.normalize(rotation_axis)
+
+        return glm.angleAxis(glm.pi(), rotation_axis)
 
     rotation_axis = glm.cross(v1, v2)
     s = glm.sqrt((1 + cos_theta) * 2)

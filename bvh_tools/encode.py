@@ -8,9 +8,9 @@ from pyglm import glm
 import sys
 
 # --- 사용자 정의 모듈 임포트 ---
-from bvh_controller import parse_bvh, get_preorder_joint_list
-from Rendering import draw_humanoid
-from utils import draw_axes, set_lights
+from bvh_tools.bvh_controller import parse_bvh, get_preorder_joint_list
+from bvh_tools.Rendering import draw_humanoid
+from bvh_tools.utils import draw_axes, set_lights
 
 # ----------------- 설정 -----------------
 OUTPUT_FILENAME = "output/output_headless.mp4"
