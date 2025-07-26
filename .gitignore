@@ -6,3 +6,6 @@ imgui.ini
 output/
 100STYLE/
 bvh_set/
+rendering/
+outputs/
+ex.ipynb

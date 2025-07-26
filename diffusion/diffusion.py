@@ -37,3 +37,4 @@ class Diffusion:
         mask = (t != 0).float().reshape(-1, 1, 1)
         
         return mean + mask * std_dev * noise
+    

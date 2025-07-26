@@ -1,9 +1,9 @@
 import torch
 from tqdm import tqdm
-from bvh_tools.reverse import tensor_to_bvh
+from bvh_tools.reverse import tensor_to_kinematics
+from utils.encode import encode
 
-def sample_motion_while_training(model, scheduler, mean, std, epoch, device, output_path, template_path, clip_length=180, feature_dim=171):
-    print(f"\n--- Epoch {epoch}: Generating a sample motion ---")
+def sample_motion_while_training(model, scheduler, mean, std, device, output_path, template_path, clip_length=180, feature_dim=171):
     model.eval()
 
     sample = torch.randn((1, clip_length, feature_dim), device=device)
@@ -12,10 +12,13 @@ def sample_motion_while_training(model, scheduler, mean, std, epoch, device, out
         with torch.no_grad():
             t_tensor = torch.tensor([t], device=device)
             predicted_noise = model(sample, t_tensor)
-            sample = scheduler.step(predicted_noise, t, sample)
+            sample = scheduler.p_step(predicted_noise, t_tensor, sample)
 
     generated_clip = sample.squeeze(0).cpu().numpy()
+    
     denormalized_clip = generated_clip * std + mean
-    tensor_to_bvh(denormalized_clip, output_path=output_path, template_path=template_path)
+    root, all_frames_data = tensor_to_kinematics(denormalized_clip, template_path=template_path)
+    print(f"Generated motion with {len(all_frames_data)} frames.")
+    encode(root, all_frames_data, output_filename=output_path)
 
     model.train()

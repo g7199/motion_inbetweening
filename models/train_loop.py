@@ -17,9 +17,10 @@ def train(args):
     os.makedirs(samples_dir, exist_ok=True)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Using device: {device}")
     
     dataset = MotionClipDataset(args.bvh_dir, clip_length=args.clip_length, feat_bias=args.feat_bias)
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
     diffusion = Diffusion(num_timesteps=1000, device=device)
     model = MotionTransformer(
         feature_dim=args.feature_dim, latent_dim=args.latent_dim, num_layers=args.num_layers, 
@@ -30,7 +31,7 @@ def train(args):
 
     # main loop
     for epoch in tqdm(range(args.num_epochs)):
-        for step, clean_motion in tqdm(enumerate(dataloader)):
+        for step, clean_motion in enumerate(dataloader):
             optimizer.zero_grad()
             
             clean_motion = clean_motion.to(device)  
@@ -54,9 +55,10 @@ def train(args):
         print(f"Epoch {epoch} model saved to {save_path}")
 
         epoch_samples_dir = os.path.join(samples_dir, f"epoch_{epoch}")
+        print(f"\n--- Epoch {epoch}: Generating a sample motion ---")
         os.makedirs(epoch_samples_dir, exist_ok=True)
-        for i in range(6):
-            sample_output_path = os.path.join(epoch_samples_dir, f"{i}.bvh")
+        for i in range(3):
+            sample_output_path = os.path.join(epoch_samples_dir, f"{i}.mp4")
             sample_motion_while_training(
                 model=model, scheduler=diffusion, 
                 mean=dataset.mean, std=dataset.std,

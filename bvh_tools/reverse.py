@@ -1,58 +1,129 @@
-from scipy.spatial.transform import Rotation as R
 import numpy as np
+from scipy.spatial.transform import Rotation as R
+from bvh_tools.bvh_controller import Motion, MotionFrame, get_preorder_joint_list, parse_bvh, VirtualRootJoint
+from pyglm import glm
 
-def rotation_6d_to_euler(d6_rotations):
-    # 6D -> 3x3 회전 행렬
-    a1, a2 = d6_rotations[..., :3], d6_rotations[..., 3:]
-    b1 = a1 / np.linalg.norm(a1, axis=-1, keepdims=True)
-    b2 = a2 - np.sum(b1 * a2, axis=-1, keepdims=True) * b1
-    b2 = b2 / np.linalg.norm(b2, axis=-1, keepdims=True)
-    b3 = np.cross(b1, b2, axis=-1)
-    rotation_matrix = np.stack([b1, b2, b3], axis=-1)
+def convert_6d_to_rotmat_np(d6: np.ndarray) -> np.ndarray:
+    """Numpy를 사용하여 6D 회전 표현을 3x3 회전 행렬로 변환합니다."""
+    a1 = d6[:3]
+    a2 = d6[3:]
+    b1 = a1 / np.linalg.norm(a1)
+    b2 = a2 - np.dot(b1, a2) * b1
+    b2 = b2 / np.linalg.norm(b2)
+    b3 = np.cross(b1, b2)
+    return np.stack([b1, b2, b3], axis=-1)
 
-    r = R.from_matrix(rotation_matrix)
-    return r.as_euler('zyx', degrees=True)
-
-
-def tensor_to_bvh(motion_tensor, output_path, template_path):
-
+def parse_bvh_skeleton(template_path: str):
+    """
+    BVH 파일에서 골격 정보(오프셋, End Site 여부)를 파싱합니다.
+    """
     with open(template_path, 'r') as f:
         lines = f.readlines()
-    
-    hierarchy_lines = []
-    for i, line in enumerate(lines):
-        hierarchy_lines.append(line)
-        if "MOTION" in line:
-            break
+
+    joint_offsets = []
+    is_end_site = [] # 각 관절이 End Site인지 여부를 저장
+
+    for line in lines:
+        line = line.strip()
+        
+        if "ROOT" in line or "JOINT" in line:
+            is_end_site.append(False)
+        elif "End Site" in line:
+            is_end_site.append(True)
             
+        if "OFFSET" in line:
+            parts = line.split()[1:]
+            joint_offsets.append(np.array([float(p) for p in parts]))
+        elif "MOTION" in line:
+            break
+
+    print(len(is_end_site))
+            
+    return np.array(joint_offsets), is_end_site
+
+def tensor_to_kinematics(motion_tensor, template_path):
+    print(motion_tensor.shape)
+    print("Parsing skeleton hierarchy (including End Sites)...")
+    joint_offsets, is_end_site = parse_bvh_skeleton(template_path)
+    root, motion = parse_bvh(template_path)
+    root = VirtualRootJoint(root)
+    num_total_joints = len(is_end_site)
+    
     num_frames = motion_tensor.shape[0]
-    frame_time = 0.016667
+    all_frames_data = []
 
-    motion_lines = []
-    motion_lines.append(f"Frames: {num_frames}\n")
-    motion_lines.append(f"Frame Time: {frame_time}\n")
+    current_global_pos = np.array([0.0, 0.0, 0.0])
+    current_local_pos = np.array([0.0, 0.0, 0.0])
+    current_yaw_angle_rad = 0.0
 
-    num_joints = (motion_tensor.shape[1]-3)//3
+    
     for frame_idx in range(num_frames):
         frame_data = motion_tensor[frame_idx]
-        
-        root_pos = frame_data[0:3]
-        root_rot_6d = frame_data[3:9]
-        joint_rot_6d = frame_data[9:].reshape((num_joints - 1), 6)
-        
-        root_rot_euler = rotation_6d_to_euler(root_rot_6d)
-        joint_rot_euler = rotation_6d_to_euler(joint_rot_6d)
-        
-        line_data = [
-            f"{root_pos[0]:.6f}", f"{root_pos[1]:.6f}", f"{root_pos[2]:.6f}",
-            f"{root_rot_euler[0]:.6f}", f"{root_rot_euler[1]:.6f}", f"{root_rot_euler[2]:.6f}"
-        ]
-        line_data.extend([f"{angle:.6f}" for euler in joint_rot_euler for angle in euler])
-        
-        motion_lines.append(" ".join(line_data) + "\n")
 
-    with open(output_path, 'w') as f:
-        f.writelines(hierarchy_lines)
-        f.writelines(motion_lines)
-        
-    print(f"BVH file succesfully saved in '{output_path}'")
+        linear_velocity_xz = frame_data[0:2]
+        angular_velocity_yaw_rad = frame_data[2]
+        root_height_y = frame_data[3]
+        root_local_rot_6d = frame_data[4:10]
+        joint_rot_6d_flat = frame_data[10:]
+
+        current_global_pos[0] += linear_velocity_xz[0]
+        current_global_pos[2] += linear_velocity_xz[1]
+        current_local_pos[1] = root_height_y 
+        current_yaw_angle_rad += angular_velocity_yaw_rad
+        c, s = np.cos(current_yaw_angle_rad), np.sin(current_yaw_angle_rad)
+        global_yaw_rot_mat = np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]])
+
+        global_transform = np.identity(4)
+        global_transform[:3, :3] = global_yaw_rot_mat
+        global_transform[:3, 3] = current_global_pos
+
+        root_local_rot_mat = convert_6d_to_rotmat_np(root_local_rot_6d)
+        root_local_transform = np.identity(4)
+        root_local_transform[:3, :3] = root_local_rot_mat
+        root_local_transform[:3, 3] = current_local_pos
+
+        joint_local_transforms = []
+        rot_data_idx = 0 
+
+        for i in range(1, num_total_joints):
+            local_transform = np.identity(4)
+            
+            if is_end_site[i]:
+                # 이 노드가 End Site일 경우: 회전은 Identity, 위치는 오프셋
+                local_transform[:3, 3] = joint_offsets[i]
+            else:
+                # 일반 JOINT일 경우: 회전은 텐서에서, 위치는 오프셋
+                start = rot_data_idx * 6
+                end = start + 6
+                joint_6d = joint_rot_6d_flat[start:end]
+                
+                local_rot_mat = convert_6d_to_rotmat_np(joint_6d)
+                local_transform[:3, :3] = local_rot_mat
+                local_transform[:3, 3] = joint_offsets[i]
+                
+                # 다음 회전 데이터를 가리키도록 인덱서 증가
+                rot_data_idx += 1
+                
+            joint_local_transforms.append(local_transform)
+
+        current_frame_data = np.stack([global_transform, root_local_transform] + joint_local_transforms)
+        all_frames_data.append(current_frame_data)
+
+    return root, all_frames_data
+
+def populate_kinematics_dfs(root, current_frame_data):
+
+    matrix_iterator = iter(current_frame_data)
+
+    def _assign_dfs(joint):
+        try:
+            joint.kinematics = glm.mat4(next(matrix_iterator))
+        except StopIteration:
+            print("Warning: Not enough matrices in current_frame_data to populate all joints.")
+            return
+
+        for child in joint.children:
+            _assign_dfs(child)
+
+    _assign_dfs(root)
+    

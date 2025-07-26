@@ -1,5 +1,6 @@
 import argparse
 import yaml
+import torch
 from types import SimpleNamespace
 from models.train_loop import train 
 
@@ -17,4 +18,5 @@ def main():
     train(config)
 
 if __name__ == '__main__':
+    torch.multiprocessing.set_start_method('spawn', force=True)
     main()
