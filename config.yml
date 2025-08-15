@@ -1,0 +1,26 @@
+bvh_dir: 'bvh_set/'
+output_dir: 'outputs/'
+template_bvh: 'data/template.bvh' # 샘플 생성 시 사용할 템플릿 파일
+
+# --- 데이터 및 모델 차원 ---
+clip_length: 180
+feature_dim: 211
+latent_dim: 512
+num_layers: 12
+ff_size: 3072
+nhead: 8
+dropout: 0.1
+activation: "gelu"
+
+# --- 훈련 하이퍼파라미터 ---
+num_epochs: 500
+batch_size: 64
+num_workers: 16
+learning_rate: 0.0001
+weight_decay: 0.05
+lr_anneal_steps: 200000
+feat_bias: 15.0
+
+# --- 로깅 및 저장 ---
+log_interval: 100
+save_interval: 5

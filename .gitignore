@@ -1,0 +1,12 @@
+__pycache__/
+bvh/
+.idea/
+imgui.ini
+.DS_Store
+output/
+100STYLE/
+bvh_set/
+rendering/
+outputs/
+ex.ipynb
+wandb/
