@@ -10,7 +10,7 @@ from pyglm import glm
 import sys
 
 # --- 사용자 정의 모듈 임포트 ---
-from bvh_tools.Rendering import draw_humanoid
+from bvh_tools.Rendering import draw_humanoid, draw_trajectory
 from bvh_tools.utils import draw_axes, set_lights
 from bvh_tools.reverse import populate_kinematics_dfs
 
@@ -54,7 +54,7 @@ def save_video(frames, filename, fps):
 # ==============================================================================
 #  ↓↓↓ 요청하신 encode() 함수 ↓↓↓
 # ==============================================================================
-def encode(root, all_frames_data, output_filename="rendering/output.mp4"):
+def encode(root, all_frames_data, trajectory, output_filename="rendering/output.mp4"):
     
     # 2. Pygame 및 OpenGL 초기화 (화면 없는 모드)
     pygame.init()
@@ -94,6 +94,7 @@ def encode(root, all_frames_data, output_filename="rendering/output.mp4"):
                   camera_center.x, camera_center.y, camera_center.z,
                   camera_up.x, camera_up.y, camera_up.z)
         draw_axes()
+        draw_trajectory(trajectory)
         populate_kinematics_dfs(root, all_frames_data[frame_idx])
         
         draw_humanoid(root, [0.2, 0.6, 0.9])

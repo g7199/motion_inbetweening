@@ -67,3 +67,30 @@ def draw_virtual_root_axis(kinematics, color, circle_radius=10, arrow_length=20)
     glColor3f(1.0, 1.0, 1.0)
     draw_undercircle(10)
     glPopMatrix()
+
+def draw_trajectory(trajectory, color=(0.0, 1.0, 0.0), line_width=2.0):
+    """
+    [T, 2] 형태의 trajectory를 땅바닥(y=0)에 초록색 선으로 그립니다.
+    :param trajectory: [T, 2] 배열 (각 행: [x, z])
+    :param color: 선 색상 (기본: 초록색)
+    :param line_width: 선 두께 (기본: 2.0)
+    """
+    if len(trajectory) == 0:
+        return  # 빈 trajectory 무시
+
+    # trajectory를 numpy 배열로 변환 (리스트일 경우 대비)
+    trajectory = np.array(trajectory)
+    if trajectory.shape[1] != 2:
+        raise ValueError("Trajectory must be [T, 2] shape (x, z per row)")
+
+    glPushMatrix()
+    glLineWidth(line_width)  # 선 두께 설정
+    glColor3f(*color)        # 색상 설정 (기본: 초록색)
+    
+    glBegin(GL_LINE_STRIP)   # 연속된 선 그리기 시작
+    for point in trajectory:
+        x, z = point
+        glVertex3f(x, 0.0, z)  # y=0으로 땅바닥에 고정
+    glEnd()                  # 그리기 종료
+    
+    glPopMatrix()

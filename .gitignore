@@ -8,5 +8,8 @@ output/
 bvh_set/
 rendering/
 outputs/
+outputs_condition/
 ex.ipynb
 wandb/
+hi.py
+trajectory.pt

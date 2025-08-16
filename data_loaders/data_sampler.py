@@ -30,6 +30,7 @@ def get_data(motion, virtual_root, time_size=180, start_frame=0, include_pos=Tru
     data = []
     prev_yaw = None
     prev_global_pos_xz = None
+    global_pos_xz = []
 
     for i in range(start_frame, start_frame + time_size):
         motion.apply_to_skeleton(i, virtual_root)
@@ -54,6 +55,7 @@ def get_data(motion, virtual_root, time_size=180, start_frame=0, include_pos=Tru
         else:
             linear_velocity = current_global_pos_xz - prev_global_pos_xz
         prev_global_pos_xz = current_global_pos_xz
+        global_pos_xz.append(current_global_pos_xz)
 
         parts = []
         posis = []
@@ -64,7 +66,12 @@ def get_data(motion, virtual_root, time_size=180, start_frame=0, include_pos=Tru
         final_feature = np.concatenate([linear_velocity, np.array([angular_velocity]), pose_features, posis_features])
         data.append(final_feature)
 
-    return np.array(data)
+    global_pos_xz = np.array(global_pos_xz)
+    if len(global_pos_xz) > 0:
+        start_pos = global_pos_xz[0]  # 첫 번째 프레임의 위치
+        global_pos_xz -= start_pos   # 모든 위치에서 첫 위치를 빼서 상대 위치로 만듦
+
+    return np.array(data), global_pos_xz
 
 
 def get_statistics(bvh_dir, clip_length=180, feature_dim=172):

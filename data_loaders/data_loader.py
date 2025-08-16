@@ -38,7 +38,7 @@ class MotionClipDataset(Dataset):
             else:
                 num_clips_per_file.append(0)
         
-        self.cum_clips_per_file = np.cumsum(num_clips_per_file)
+        self.cum_clips_per_file = np.concatenate([[0], np.cumsum(num_clips_per_file)])
         self.total_clips = self.cum_clips_per_file[-1] if len(self.cum_clips_per_file) > 0 else 0
 
         print(f"Total {self.total_clips} trainable clips found.")
@@ -47,8 +47,8 @@ class MotionClipDataset(Dataset):
         return self.total_clips
 
     def __getitem__(self, idx):
-        file_idx = np.searchsorted(self.cum_clips_per_file, idx, side='right')
-        start_frame = idx - self.cum_clips_per_file[file_idx - 1] if file_idx > 0 else idx
+        file_idx = np.searchsorted(self.cum_clips_per_file[1:], idx, side='right')
+        start_frame = idx - self.cum_clips_per_file[file_idx]
 
         if file_idx not in self.motion_cache:
 
@@ -63,6 +63,6 @@ class MotionClipDataset(Dataset):
         virtual_root, motion = self.motion_cache[file_idx]
         
 
-        clip_data = get_data(motion, virtual_root, self.clip_length, start_frame)
+        clip_data, condition_pos = get_data(motion, virtual_root, self.clip_length, start_frame)
         clip_data = (clip_data - self.mean) / self.std
-        return torch.FloatTensor(clip_data)
+        return torch.FloatTensor(clip_data), torch.FloatTensor(condition_pos)
