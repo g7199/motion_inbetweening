@@ -1,5 +1,6 @@
 from pyglm import glm
 from bvh_tools.virtual_transforms import get_pelvis_virtual_safe
+from bvh_tools.joint import Joint, VirtualRootJoint
 import math
 import numpy as np
 
@@ -10,26 +11,6 @@ def mat4_close(a, b, eps=1e-4):
                 print(f"Mismatch at ({i},{j}): {a[i][j]} vs {b[i][j]}")
                 return False
     return True
-
-class Joint:
-    def __init__(self, name, offset, channels):
-        self.name = name
-        self.offset = offset
-        self.channels = channels
-        self.children = []
-        self.parent = None
-        self.kinematics = glm.mat4(1.0)
-
-    def add_child(self, child_joint):
-        child_joint.parent = self
-        self.children.append(child_joint)
-
-
-class VirtualRootJoint(Joint):
-    def __init__(self, root):
-        super().__init__("VirtualRoot", [0, 0, 0], ['Xposition', 'Yposition', 'Zposition', 'Zrotation', 'Yrotation', 'Xrotation'])
-        self.add_child(root)
-
 
 class MotionFrame:
     def __init__(self):

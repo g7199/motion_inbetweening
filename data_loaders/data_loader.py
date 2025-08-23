@@ -16,16 +16,21 @@ def get_bvh_frame_count(file_path):
     return 0
 
 class MotionClipDataset(Dataset):
-    def __init__(self, bvh_dir, clip_length=180, feat_bias=5.0):
+    def __init__(self, bvh_dir, clip_length=180, feat_bias=5.0, height_threshold=5.0, velocity_threshold=2.0):
         self.clip_length = clip_length
         self.bvh_files = sorted(glob.glob(f"{bvh_dir}/**/*.bvh", recursive=True))
+        self.height_threshold = height_threshold
+        self.velocity_threshold = velocity_threshold
         print(f"Found {len(self.bvh_files)} BVH files in {bvh_dir}")
         
-        self.mean = np.load('data/mean.npy')
-        std = np.load('data/std.npy')
+        self.mean = np.load('data/mean_pos.npy')
+        std = np.load('data/std_pos.npy')
         std += 1e-8
         std[:4] /= feat_bias
+        std[-4:] /= feat_bias
         self.std = std
+        self.mean_vel = self.mean[:3]  # [2] – velocity 부분 mean
+        self.std_vel = self.std[:3]    # [2] – velocity 부분 std
 
         self.motion_cache = {}
 
@@ -38,7 +43,7 @@ class MotionClipDataset(Dataset):
             else:
                 num_clips_per_file.append(0)
         
-        self.cum_clips_per_file = np.cumsum(num_clips_per_file)
+        self.cum_clips_per_file = np.concatenate([[0], np.cumsum(num_clips_per_file)])
         self.total_clips = self.cum_clips_per_file[-1] if len(self.cum_clips_per_file) > 0 else 0
 
         print(f"Total {self.total_clips} trainable clips found.")
@@ -47,8 +52,8 @@ class MotionClipDataset(Dataset):
         return self.total_clips
 
     def __getitem__(self, idx):
-        file_idx = np.searchsorted(self.cum_clips_per_file, idx, side='right')
-        start_frame = idx - self.cum_clips_per_file[file_idx - 1] if file_idx > 0 else idx
+        file_idx = np.searchsorted(self.cum_clips_per_file[1:], idx, side='right')
+        start_frame = idx - self.cum_clips_per_file[file_idx]
 
         if file_idx not in self.motion_cache:
 
@@ -61,8 +66,8 @@ class MotionClipDataset(Dataset):
             self.motion_cache[file_idx] = (virtual_root, motion)
 
         virtual_root, motion = self.motion_cache[file_idx]
-        
 
-        clip_data = get_data(motion, virtual_root, self.clip_length, start_frame)
+        clip_data, condition_pos = get_data(motion, virtual_root, self.clip_length, start_frame, height_threshold=self.height_threshold, velocity_threshold=self.velocity_threshold)
         clip_data = (clip_data - self.mean) / self.std
-        return torch.FloatTensor(clip_data)
+        condition_pos = (condition_pos - self.mean_vel) / self.std_vel
+        return torch.FloatTensor(clip_data), torch.FloatTensor(condition_pos)

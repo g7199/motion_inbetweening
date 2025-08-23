@@ -67,3 +67,66 @@ def draw_virtual_root_axis(kinematics, color, circle_radius=10, arrow_length=20)
     glColor3f(1.0, 1.0, 1.0)
     draw_undercircle(10)
     glPopMatrix()
+
+def draw_trajectory(trajectory_vel, traj_mean, traj_std, dt=1/60.0, color=(0.0, 1.0, 0.0), line_width=2.0):
+    """
+    [T, 2] 형태의 trajectory_vel (각 행: [vel_x, vel_z])를 누적 position으로 변환해 땅바닥(y=0)에 초록색 선으로 그립니다.
+    :param trajectory_vel: [T, 2] 배열 (velocity)
+    :param dt: timestep (기본: 1/60)
+    :param color: 선 색상 (기본: 초록색)
+    :param line_width: 선 두께 (기본: 2.0)
+    """
+    if len(trajectory_vel) == 0:
+        return  # 빈 trajectory 무시
+
+    # trajectory_vel를 numpy 배열로 변환 (리스트일 경우 대비)
+    trajectory_vel = np.array(trajectory_vel)
+    trajectory_vel = trajectory_vel * traj_std + traj_mean
+
+    # Velocity 누적해서 position 계산 (첫 pos=[0,0])
+    trajectory_pos = np.cumsum(trajectory_vel, axis=0)  # [T, 2]
+    trajectory_pos = np.insert(trajectory_pos, 0, [0.0, 0.0], axis=0)  # 첫 프레임 [0,0] 추가
+
+    glPushMatrix()
+    glLineWidth(line_width)  # 선 두께 설정
+    glColor3f(*color)        # 색상 설정 (기본: 초록색)
+    
+    glBegin(GL_LINE_STRIP)   # 연속된 선 그리기 시작
+    for point in trajectory_pos:
+        x, z = point
+        glVertex3f(x, 0.0, z)  # y=0으로 땅바닥에 고정
+    glEnd()                  # 그리기 종료
+    
+    glPopMatrix()
+
+def draw_positions_points_frame(positions_frame, pos_mean=None, pos_std=None,
+                                point_size=4.0, color=(0.0, 1.0, 0.0),
+                                use_sphere=False, sphere_radius=2.5):
+    """
+    positions_frame: [J, 3] 현재 프레임의 3D 좌표들
+    pos_mean/pos_std가 주어지면 복원, 없으면 그대로 사용
+    """
+    if positions_frame is None or len(positions_frame) == 0:
+        return
+
+    pos = np.asarray(positions_frame, dtype=np.float32)
+    if pos_mean is not None and pos_std is not None:
+        pos = pos * np.asarray(pos_std, dtype=np.float32) + np.asarray(pos_mean, dtype=np.float32)
+
+    if not use_sphere:
+        glPointSize(point_size)
+        glColor3f(*color)
+        glBegin(GL_POINTS)
+        for j in range(pos.shape[0]):
+            x, y, z = map(float, pos[j])
+            glVertex3f(x, y, z)
+        glEnd()
+    else:
+        glColor3f(*color)
+        for j in range(pos.shape[0]):
+            x, y, z = map(float, pos[j])
+            glPushMatrix()
+            glTranslatef(x, y, z)
+            draw_colored_sphere(sphere_radius)
+            glPopMatrix()
+

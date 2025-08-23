@@ -1,43 +1,87 @@
 import numpy as np
 import math
 
-def get_kinematics_dfs(joint, result_list, posis_list,
+def get_kinematics_dfs(joint, result_list, posis_list, relative_posis_list, contact_list=None,
+                       prev_foot_positions=None, dt=1/60.0,
                        cur_pos=np.zeros(3), cur_rot=np.eye(3),
-                       include_pos=True, is_root=True):
+                       include_pos=True, is_root=True, height_threshold=5.0):
+    
+    # 4개 foot joint 구분 (기존 RightToe, LeftToe에서 확장)
+    foot_joints = {
+        "RightAnkle": 0,  # right_heel index
+        "RightToe": 1,    # right_toe index
+        "LeftAnkle": 2,   # left_heel index  
+        "LeftToe": 3      # left_toe index
+    }
+    
     T = np.array(joint.kinematics)   # [4,4] 로컬
     R_local = T[:3, :3]
     p_local = T[:3, 3]
 
-    # 부모 좌표계 → 현재 글로벌
+    # 부모 좌표계 → 현재 로컬 루트 기준
     p_global = cur_rot @ p_local + cur_pos
     R_global = cur_rot @ R_local
 
     if is_root:
-        result_list.append(np.array([p_local[1]]))
+        result_list.append(np.array([p_local[1]]))  # root height
 
     if joint.name != "End Site":
         result_list.append(R_local[:, :2].T.flatten())  # 6D rot
-        if include_pos:
-            posis_list.append(p_global)
+        if (include_pos and not is_root):
+            posis_list.append(p_global)  # velocity 계산용
+            relative_posis_list.append(p_global)
+
+        if contact_list is not None and joint.name in foot_joints:
+            height_contact = int(p_global[1] < height_threshold)  # binary 0 or 1
+            foot_idx = foot_joints[joint.name]
+            contact_list.append((foot_idx, height_contact, p_global.copy()))
 
     for child in joint.children:
-        get_kinematics_dfs(child, result_list, posis_list,
-                           p_global, R_global, include_pos=include_pos, is_root=False)
+        get_kinematics_dfs(child, result_list, posis_list, relative_posis_list, contact_list,
+                          prev_foot_positions, dt, p_global, R_global, 
+                          include_pos=include_pos, is_root=False)
 
 
-
-def get_data(motion, virtual_root, time_size=180, start_frame=0, include_pos=True):
+def get_data(motion, virtual_root, time_size=180, start_frame=0, include_pos=True, 
+             height_threshold=5.0, velocity_threshold=2.0):
     data = []
     prev_yaw = None
     prev_global_pos_xz = None
-
+    global_pos_xz = []
+    
+    # 4차원으로 변경: [right_heel, right_toe, left_heel, left_toe] (int으로 binary)
+    foot_contacts = np.zeros((time_size, 4), dtype=int)
+    
+    # 각 발 부위별 position 저장 (velocity 계산용)
+    foot_positions = [
+        np.zeros((time_size, 3)),  # right_heel (index 0)
+        np.zeros((time_size, 3)),  # right_toe (index 1)
+        np.zeros((time_size, 3)),  # left_heel (index 2)  
+        np.zeros((time_size, 3))   # left_toe (index 3)
+    ]
+    
+    # 모든 관절의 position 저장 (velocity 계산용)
+    all_joint_positions = []
+    # 상대 position 저장
+    all_relative_positions = []
+    
+    global_rot = None
+    local_rot = None
+    
     for i in range(start_frame, start_frame + time_size):
         motion.apply_to_skeleton(i, virtual_root)
         root = virtual_root.children[0]
 
+        if global_rot is None:
+            global_rot = np.array(virtual_root.kinematics)[:3, :3]
+        if local_rot is None:
+            local_rot = np.array(root.kinematics)[:3, :3]
+
+        # Root processing (기존과 동일)
         current_global_kin = np.array(virtual_root.kinematics)
         current_global_rot = current_global_kin[:3, :3]
         current_global_pos = current_global_kin[:3, 3]
+        current_global_pos = local_rot @ global_rot.T @ current_global_pos
         current_yaw = math.atan2(current_global_rot[0, 2], current_global_rot[2, 2])
 
         if prev_yaw is None:
@@ -54,133 +98,86 @@ def get_data(motion, virtual_root, time_size=180, start_frame=0, include_pos=Tru
         else:
             linear_velocity = current_global_pos_xz - prev_global_pos_xz
         prev_global_pos_xz = current_global_pos_xz
+        trajectory_data = np.array([linear_velocity[0], linear_velocity[1], angular_velocity])
+        global_pos_xz.append(trajectory_data)
 
+        # Extract kinematics
         parts = []
         posis = []
-        get_kinematics_dfs(root, parts, posis, include_pos=include_pos)  # 여기만 True로
+        relative_posis = []
+        foot_frame = []
+        
+        get_kinematics_dfs(root, parts, posis, relative_posis, foot_frame, 
+                          include_pos=include_pos, 
+                          height_threshold=height_threshold)
+
+        # posis를 저장 (나중에 velocity로 변환)
+        all_joint_positions.append(posis)
+        # 상대 position 저장
+        all_relative_positions.append(relative_posis)
+
+        # foot_frame에서 height_contact와 position 추출
+        frame_contact = [0, 0, 0, 0]
+        
+        for foot_idx, height_contact, position in foot_frame:
+            frame_contact[foot_idx] = height_contact
+            foot_positions[foot_idx][i-start_frame] = position
+        
+        foot_contacts[i-start_frame] = frame_contact  # 일단 height_contact만 저장 (velocity는 나중에 hybrid)
+
+        # Feature 구성 - rotation만 먼저 추가
         pose_features = np.concatenate(parts)
-        posis_features = np.concatenate(posis)
+        
+        # 임시로 저장 (velocity 계산 후 다시 구성)
+        data.append(pose_features)
 
-        final_feature = np.concatenate([linear_velocity, np.array([angular_velocity]), pose_features, posis_features])
-        data.append(final_feature)
-
-    return np.array(data)
-
-
-def get_statistics(bvh_dir, clip_length=180, feature_dim=172):
-    from tqdm import tqdm
-    from bvh_tools.bvh_controller import parse_bvh, get_preorder_joint_list
-    import glob
-
-    bvh_files = sorted(glob.glob(f"{bvh_dir}/**/*.bvh", recursive=True))
-    print(f"Found {len(bvh_files)} BVH files in {bvh_dir}")
+    # Position을 Velocity로 변환 (dt 없이 단순 차이)
+    joint_velocities = []
     
-    count = 0
-    mean = np.zeros(feature_dim)
-    M2 = np.zeros(feature_dim) # 제곱합의 차이를 저장
-
-
-    for file_path in bvh_files:
-        root, motion = parse_bvh(file_path)
-        joint_order = get_preorder_joint_list(root)
-        motion.build_quaternion_frames(joint_order)
-        virtual_root = motion.apply_virtual(root)
+    for t in range(time_size):
+        if t == 0:
+            # 첫 번째 프레임은 0으로 초기화
+            frame_velocities = [np.zeros(3) for _ in all_joint_positions[0]]
+        else:
+            # 이전 프레임과의 차이로 velocity 계산
+            frame_velocities = []
+            for j in range(len(all_joint_positions[t])):
+                vel = all_joint_positions[t][j] - all_joint_positions[t-1][j]
+                frame_velocities.append(vel)
         
-        if motion.frames >= clip_length:
-            for start_frame in tqdm(range(motion.frames - clip_length + 1)):
-                clip_data = get_data(motion, virtual_root, clip_length, start_frame)
+        # flatten해서 저장
+        joint_velocities.append(np.concatenate(frame_velocities))
 
-                for frame_vector in clip_data:
-                    count += 1
-                    delta = frame_vector - mean
-                    mean += delta / count
-                    delta2 = frame_vector - mean
-                    M2 += delta * delta2
-
-    if count > 0:
-        std = np.sqrt(M2 / count)
-        print("\nDone!")
-        print(f"Mean shape: {mean.shape}")
-        print(f"Std shape: {std.shape}")
-    else:
-        print("No calculated data.")
-
-    np.save('data/mean.npy', mean)
-    np.save('data/std.npy', std)
-
-def process_file_for_stats(file_path, clip_length, feature_dim):
-    from bvh_tools.bvh_controller import parse_bvh, get_preorder_joint_list
-    print(f"Processing file: {file_path}")
+    # Velocity calculation for all 4 foot parts (contact detection용 - dt 사용)
+    dt = 1/60.0
+    foot_velocities = []
     
-    local_count = 0
-    local_sum = np.zeros(feature_dim)
-    local_sum_sq = np.zeros(feature_dim) # 제곱의 합
+    for foot_pos in foot_positions:
+        vel = np.linalg.norm(np.diff(foot_pos, axis=0), axis=1) / dt  # 물리적 속도
+        vel = np.insert(vel, 0, 0.0)  # Add 0 for first frame
+        foot_velocities.append(vel)
 
-    try:
-        root, motion = parse_bvh(file_path)
-        joint_order = get_preorder_joint_list(root)
-        motion.build_quaternion_frames(joint_order)
-        virtual_root = motion.apply_virtual(root)
+    # Hybrid contact detection (height AND velocity) for all 4 parts (binary 0 or 1)
+    for i in range(4):
+        vel = foot_velocities[i]
+        vel_contact = (vel < velocity_threshold).astype(int)
+        foot_contacts[:, i] = foot_contacts[:, i] & vel_contact  # binary AND
+
+    # 최종 데이터 구성: [trajectory, pose, relative_positions, joint_velocities, foot_contacts]
+    data_with_features = []
+    for t in range(time_size):
+        # 상대 position을 flatten
+        relative_pos_flattened = np.concatenate(all_relative_positions[t])
         
-        if motion.frames >= clip_length:
-            for start_frame in range(motion.frames - clip_length + 1):
-                clip_data = get_data(motion, virtual_root, clip_length, start_frame)
-                
-                # 자신만의 통계치를 누적
-                local_count += clip_data.shape[0] 
-                local_sum += np.sum(clip_data, axis=0)
-                local_sum_sq += np.sum(clip_data**2, axis=0)
-
-    except Exception as e:
-        print(f"Error processing {file_path}: {e}")
-        
-    print(f"Finished processing file: {file_path}")
-    return local_count, local_sum, local_sum_sq
-
-def get_statistics_parallel(bvh_dir, clip_length=180, feature_dim=172):
-    from joblib import Parallel, delayed
-    from tqdm import tqdm
-    import glob
-
-    bvh_files = sorted(glob.glob(f"{bvh_dir}/**/*.bvh", recursive=True))
-    print("병렬 처리를 시작합니다...")
+        frame_data = np.concatenate([
+            global_pos_xz[t],           # [3] - linear_vel_x, linear_vel_z, angular_vel
+            data[t],                    # pose features (rotations)
+            relative_pos_flattened,     # relative positions (이미 root 기준)
+            #joint_velocities[t],        # joint velocities (positions → velocities)
+            foot_contacts[t]            # [4] - foot contact binary (0 or 1)
+        ])
+        data_with_features.append(frame_data)
     
-    with Parallel(n_jobs=-1) as parallel:
-        
-        # 1. 실행할 작업 목록을 미리 준비합니다.
-        tasks = (delayed(process_file_for_stats)(fp, clip_length, feature_dim) for fp in bvh_files)
-        
-        # 2. parallel()이 반환하는 결과 이터레이터(iterator)를 tqdm으로 감쌉니다.
-        results = tqdm(parallel(tasks), total=len(bvh_files))
-        
-        # 3. 결과를 리스트로 변환합니다. 이 과정에서 프로그레스 바가 표시됩니다.
-        results_list = list(results)
+    data_with_features = np.array(data_with_features)  # [T, feature_dim + relative_pos_dim + 4]
     
-    # 각 워커가 반환한 결과들을 취합
-    total_count = 0
-    total_sum = np.zeros(feature_dim)
-    total_sum_sq = np.zeros(feature_dim)
-    
-    for local_count, local_sum, local_sum_sq in results:
-        total_count += local_count
-        total_sum += local_sum
-        total_sum_sq += local_sum_sq
-        
-    if total_count == 0:
-        print("처리된 데이터가 없습니다.")
-        return
-
-    # 최종 평균과 표준편차 계산
-    mean = total_sum / total_count
-    # 분산 = (제곱의 평균) - (평균의 제곱)
-    variance = (total_sum_sq / total_count) - (mean ** 2)
-    std = np.sqrt(variance)
-
-    print("\n계산 완료!")
-    print(f"Mean shape: {mean.shape}")
-    print(f"Std shape: {std.shape}")
-
-    # 파일 저장
-    np.save('data/mean.npy', mean)
-    np.save('data/std.npy', std)
-        
+    return data_with_features, np.array(global_pos_xz)

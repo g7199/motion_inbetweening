@@ -19,7 +19,7 @@ def process_file_for_stats(file_path, clip_length, feature_dim):
         
         if motion.frames >= clip_length:
             for start_frame in range(motion.frames - clip_length + 1):
-                clip_data = get_data(motion, virtual_root, clip_length, start_frame)
+                clip_data, _ = get_data(motion, virtual_root, clip_length, start_frame)
 
                 if not np.isfinite(clip_data).all():
                     nan_count = np.isnan(clip_data).sum()
@@ -39,7 +39,7 @@ def process_file_for_stats(file_path, clip_length, feature_dim):
     print(f"Finished processing file: {file_path}")
     return local_count, local_sum, local_sum_sq
 
-def get_statistics_parallel(bvh_dir, clip_length=180, feature_dim=211):
+def get_statistics_parallel(bvh_dir, clip_length=180, feature_dim=212):
     from joblib import Parallel, delayed
     from tqdm import tqdm
     import glob

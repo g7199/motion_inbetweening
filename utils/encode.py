@@ -10,7 +10,7 @@ from pyglm import glm
 import sys
 
 # --- 사용자 정의 모듈 임포트 ---
-from bvh_tools.Rendering import draw_humanoid
+from bvh_tools.Rendering import draw_humanoid, draw_trajectory, draw_positions_points_frame
 from bvh_tools.utils import draw_axes, set_lights
 from bvh_tools.reverse import populate_kinematics_dfs
 
@@ -54,7 +54,10 @@ def save_video(frames, filename, fps):
 # ==============================================================================
 #  ↓↓↓ 요청하신 encode() 함수 ↓↓↓
 # ==============================================================================
-def encode(root, all_frames_data, output_filename="rendering/output.mp4"):
+def encode(root, all_frames_data,
+           trajectory=None, traj_mean=None, traj_std=None,
+           positions=None,  pos_mean=None, pos_std=None,
+           output_filename="rendering/output.mp4"):
     
     # 2. Pygame 및 OpenGL 초기화 (화면 없는 모드)
     pygame.init()
@@ -94,6 +97,19 @@ def encode(root, all_frames_data, output_filename="rendering/output.mp4"):
                   camera_center.x, camera_center.y, camera_center.z,
                   camera_up.x, camera_up.y, camera_up.z)
         draw_axes()
+        if trajectory is not None:
+            # sample_motion_while_training에서 호출할 때
+            draw_trajectory(trajectory[:, :2], traj_mean[:2], traj_std[:2])
+
+        if positions is not None:
+            cur_pos_frame = positions[frame_idx]   # [J, 3]
+            draw_positions_points_frame(
+                positions_frame=cur_pos_frame,
+                pos_mean=pos_mean, pos_std=pos_std,
+                point_size=3.0, color=(0.0, 1.0, 0.0),
+                use_sphere=False, sphere_radius=2.5
+            )
+            
         populate_kinematics_dfs(root, all_frames_data[frame_idx])
         
         draw_humanoid(root, [0.2, 0.6, 0.9])

@@ -8,5 +8,14 @@ output/
 bvh_set/
 rendering/
 outputs/
+outputs_condition/
+outputs_condition_foot/
+outputs_condition_vel/
 ex.ipynb
 wandb/
+hi.py
+trajectory.pt
+a.mp4
+config1.yml
+*.bvh
+*.pt
