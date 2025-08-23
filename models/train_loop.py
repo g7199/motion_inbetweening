@@ -91,7 +91,6 @@ def train(args):
         # DataLoader unpacking 수정
         for step, (clean_motion, condition_pos) in enumerate(dataloader):
             optimizer.zero_grad()
-            
             clean_motion = clean_motion.to(device)
             condition_pos = condition_pos.to(device)
 

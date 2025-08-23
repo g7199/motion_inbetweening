@@ -19,7 +19,7 @@ velocity_threshold: 2.0
 # --- 훈련 하이퍼파라미터 ---
 num_epochs: 500
 batch_size: 64
-num_workers: 16
+num_workers: 4
 learning_rate: 0.0001
 weight_decay: 0.05
 lr_anneal_steps: 200000

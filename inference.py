@@ -218,7 +218,7 @@ def inference(config):
             # (T,3) -> (1,T,3)
             if condition_pos.dim() == 2:
                 condition_pos = (condition_pos - dataset.mean_vel) / dataset.std_vel
-                print(condition_pos)
+                print(condition_pos[0])
                 condition_pos = condition_pos.unsqueeze(0)
 
             # dtype, device 정리
