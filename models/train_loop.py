@@ -3,15 +3,20 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import os
 from tqdm import tqdm
+import numpy as np
 
 from data_loaders.data_loader import MotionClipDataset
 from diffusion.diffusion import Diffusion
 from models.model import MotionTransformer
 from models.sample_motions import sample_motion_while_training
 import wandb
+from utils.keyframe import KeyframeSelector
+
+selector = KeyframeSelector(ratio=0.1)
 
 def train(args):
-    sample_conditions = []
+    # 샘플링용 데이터를 한 번에 저장할 딕셔너리
+    sample_data_for_reproduction = {}
     samples_collected = False
     max_samples = 10
 
@@ -90,33 +95,79 @@ def train(args):
 
         # DataLoader unpacking 수정
         for step, (clean_motion, condition_pos) in enumerate(dataloader):
+
             optimizer.zero_grad()
             clean_motion = clean_motion.to(device)
             condition_pos = condition_pos.to(device)
+            B, T, feat_dim = clean_motion.shape
 
-            # 첫 번째 에폭의 첫 번째 배치에서만 샘플 수집
+            # === 핵심 수정: 첫 번째 배치에서 모든 샘플링 데이터를 함께 저장 ===
             if not samples_collected and step == 0 and epoch == start_epoch:
+                # 현재 배치에서 posed 인덱스 생성 (훈련과 동일한 로직)
+                _, current_posed_indices = selector.select_keyframes_by_ratio(clean_motion)
+
                 num_to_save = min(max_samples, condition_pos.shape[0])
-                for i in range(num_to_save):
-                    # torch.FloatTensor로 변환 확실히 하기
-                    sample_cond = condition_pos[i:i+1].clone().cpu()
-                    if not isinstance(sample_cond, torch.Tensor):
-                        sample_cond = torch.FloatTensor(sample_cond)
-                    sample_conditions.append(sample_cond)
+                
+                sample_data_for_reproduction = {
+                    'conditions': condition_pos[:num_to_save].clone().cpu(),
+                    'clean_motions': clean_motion[:num_to_save].clone().cpu(),
+                    'posed_indices': [idx.clone().cpu() for idx in current_posed_indices[:num_to_save]],  # 리스트의 각 텐서 clone/cpu
+                    'dataset_stats': {
+                        'mean': dataset.mean,
+                        'std': dataset.std,
+                        'mean_vel': dataset.mean_vel,
+                        'std_vel': dataset.std_vel
+                    },
+                    'posed_ratio': args.posed_ratio,
+                    'clip_length': args.clip_length
+                }
                 
                 samples_collected = True
-                print(f"Collected {num_to_save} sample conditions from first batch")
-                torch.save(sample_conditions, os.path.join(samples_dir, 'sample_conditions_for_reproduction.pt'))
+                print(f"Collected {num_to_save} sample data (NOTE: posed_data uses hints during training)")
+                torch.save(sample_data_for_reproduction, 
+                           os.path.join(samples_dir, 'sample_data_for_reproduction.pt'))
 
+            # 일반적인 훈련 과정 (매 배치마다 새로운 posed 데이터 생성)
             t = torch.randint(0, diffusion.num_timesteps, (clean_motion.shape[0],), device=device)
             noisy_motion, real_noise = diffusion.add_noise(clean_motion, t)
-            predicted_noise = model(noisy_motion, condition_pos, t)
+
+            _, posed_indices_list = selector.select_keyframes_by_ratio(clean_motion)
+            print("hi")
+            
+            # 리스트를 padded 텐서로 변환 (전부 tensor로 관리)
+            max_K = max(len(indices) for indices in posed_indices_list)
+            padded_indices = torch.full((B, max_K), -1, dtype=torch.long, device=device)  # pad with -1
+            lengths = torch.zeros(B, dtype=torch.long, device=device)
+            
+            posed_data_padded = torch.zeros(B, max_K, feat_dim, device=device)  # pad with 0
+            
+            for b in range(B):
+                indices = posed_indices_list[b].to(device)
+                num_K = len(indices)
+                padded_indices[b, :num_K] = indices
+                lengths[b] = num_K
+                
+                posed_data_padded[b, :num_K] = clean_motion[b, indices]
+
+            # model 호출 (padded 텐서 전달) 
+            predicted_noise = model(noisy_motion, condition_pos, posed_data_padded, padded_indices, t)
 
             # === 수정: Motion/Contact loss split (feature_dim=212 가정, 마지막 4-dim=contact)
-            motion_loss = F.mse_loss(predicted_noise[:, :, :-4], real_noise[:, :, :-4])  # Motion part
-            contact_loss = F.mse_loss(predicted_noise[:, :, -4:], real_noise[:, :, -4:])  # Contact part (or BCE if binary)
+            non_posed_mask = torch.ones(B, T, dtype=torch.bool, device=device)
+            for b in range(B):
+                non_posed_mask[b, padded_indices[b, :lengths[b]]] = False
 
-            loss = F.mse_loss(predicted_noise, real_noise)  # Total loss (weight 조정 가능, e.g., + 0.1 * contact_loss)
+            # 마스크된 loss 계산
+            motion_loss = F.mse_loss(
+                predicted_noise[:, :, :-4][non_posed_mask], 
+                real_noise[:, :, :-4][non_posed_mask]
+            )
+            contact_loss = F.mse_loss(
+                predicted_noise[:, :, -4:][non_posed_mask], 
+                real_noise[:, :, -4:][non_posed_mask]
+            )
+
+            loss = F.mse_loss(predicted_noise[non_posed_mask], real_noise[non_posed_mask])  # Total loss (weight 조정 가능, e.g., + 0.1 * contact_loss)
 
             loss.backward()
             optimizer.step()
@@ -143,27 +194,47 @@ def train(args):
             }, save_path)
             print(f"Epoch {epoch} model saved to {save_path}")
 
-            # 샘플 생성 - sample_conditions가 수집된 경우에만
-            if sample_conditions:
+            # === 수정된 샘플 생성: 저장된 데이터 사용 ===
+            if sample_data_for_reproduction:
                 epoch_samples_dir = os.path.join(samples_dir, f"epoch_{epoch}")
                 print(f"\n--- Epoch {epoch}: Generating sample motions ---")
                 os.makedirs(epoch_samples_dir, exist_ok=True)
                 
-                for i in range(min(max_samples, len(sample_conditions))):
+                for i in range(len(sample_data_for_reproduction['conditions'])):
                     sample_output_path = os.path.join(epoch_samples_dir, f"{i}.mp4")
                     try:
+                        # 저장된 데이터에서 개별 샘플 추출
+                        sample_condition = sample_data_for_reproduction['conditions'][i:i+1].to(device)
+                        sample_clean_motion = sample_data_for_reproduction['clean_motions'][i:i+1].to(device)
+                        # posed_indices 처리 - 리스트에서 i번째 요소 추출
+                        if isinstance(sample_data_for_reproduction['posed_indices'], list):
+                            sample_posed_indices_tensor = sample_data_for_reproduction['posed_indices'][i].to(device)
+                            sample_num_K = len(sample_posed_indices_tensor)
+                            sample_padded_indices = torch.full((1, sample_num_K), -1, dtype=torch.long, device=device)
+                            sample_padded_indices[0, :sample_num_K] = sample_posed_indices_tensor
+                        else:
+                            sample_padded_indices = sample_data_for_reproduction['posed_indices'][i:i+1].to(device)
+                            sample_num_K = sample_padded_indices.shape[1]
+
+                        sample_posed_data = sample_clean_motion[0, sample_posed_indices_tensor[:sample_num_K]]  # 훈련과 동일한 방식!
+                        sample_posed_data = sample_posed_data.unsqueeze(0).to(device)  # [1, num_posed, F]
+                        
                         sample_motion_while_training(
-                            model=model, scheduler=diffusion, 
-                            mean=dataset.mean, std=dataset.std,
+                            model=model, 
+                            scheduler=diffusion, 
+                            mean=sample_data_for_reproduction['dataset_stats']['mean'],
+                            std=sample_data_for_reproduction['dataset_stats']['std'],
                             output_path=sample_output_path,
                             template_path=args.template_bvh,
-                            condition_pos=sample_conditions[i],
+                            condition_pos=sample_condition,
                             device=device,
                             clip_length=args.clip_length,
                             feature_dim=args.feature_dim,
                             guidance_scale=args.guidance_scale,
-                            traj_mean=traj_mean,
-                            traj_std=traj_std
+                            traj_mean=sample_data_for_reproduction['dataset_stats']['mean_vel'],
+                            traj_std=sample_data_for_reproduction['dataset_stats']['std_vel'],
+                            posed_data=sample_posed_data,  # 단일 텐서
+                            posed_indices=sample_padded_indices,  # padded 텐서
                         )
                     except Exception as e:
                         print(f"Error generating sample {i}: {e}")

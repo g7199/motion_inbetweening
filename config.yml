@@ -1,7 +1,10 @@
+# config.yml - 통합 설정 파일 (훈련 + 추론)
+
+# --- 디렉토리 설정 ---
 bvh_dir: 'bvh_set/'
 output_dir: 'outputs_condition_vel/'
 inference_dir: 'outputs_condition_vel/inference_bvh/'
-template_bvh: 'data/template.bvh' # 샘플 생성 시 사용할 템플릿 파일
+template_bvh: 'data/template.bvh'  # 샘플 생성 시 사용할 템플릿 파일
 
 # --- 데이터 및 모델 차원 ---
 clip_length: 180
@@ -12,9 +15,9 @@ ff_size: 3072
 nhead: 8
 dropout: 0.1
 activation: "gelu"
-
 height_threshold: 5.0
 velocity_threshold: 2.0
+posed_ratio: 0.1
 
 # --- 훈련 하이퍼파라미터 ---
 num_epochs: 500
@@ -25,6 +28,10 @@ weight_decay: 0.05
 lr_anneal_steps: 200000
 feat_bias: 15.0
 
+# --- 키프레임 선택기 설정 ---
+keyframes: 10
+selector_hidden_dim: 256
+
 # --- 로깅 및 저장 ---
 log_interval: 100
 save_interval: 5
@@ -32,3 +39,9 @@ save_interval: 5
 # --- cfg ---
 uncond_prob: 0.1
 guidance_scale: 4.0
+
+# --- 추론 전용 설정 ---
+checkpoint: "./outputs_condition_vel/checkpoints/checkpoint_epoch_160.pt"
+sample_data_path: "./bvh_sample_data.pt"
+num_samples: 5
+is_mp4: True

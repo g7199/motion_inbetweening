@@ -55,11 +55,13 @@ def save_video(frames, filename, fps):
             writer.append_data(frame)
     print(f"🎥 동영상이 {filename} 으로 성공적으로 저장되었습니다!")
 
-def encode(bvh_paths, output_filename="rendering/output.mp4", trajectory=None):
+def encode(bvh_paths, output_filename="rendering/output.mp4", trajectory=None, start_frame=0, clip_length=None):
     """
     BVH 파일(들)을 읽어서 렌더링하고 MP4로 저장.
     - bvh_paths: list of str (BVH 파일 경로들).
     - trajectory: optional, draw_trajectory용 데이터 (e.g., 로드된 데이터).
+    - start_frame: 렌더링 시작 프레임 (default: 0).
+    - clip_length: 렌더링할 프레임 길이 (default: None, None이면 전체 프레임 사용).
     """
     motions = []
     max_frames = 0
@@ -93,6 +95,19 @@ def encode(bvh_paths, output_filename="rendering/output.mp4", trajectory=None):
     fps = 1.0 / motions[0]['motion'].frame_time if hasattr(motions[0]['motion'], 'frame_time') else 60.0
     print(f"렌더링 FPS: {fps:.2f}")
 
+    # 루프 범위 동적 설정 (새로 추가: clip_length 지정 시 범위 제한, 아니면 전체)
+    if clip_length is not None:
+        total_frames = clip_length
+        frame_range = range(start_frame, start_frame + clip_length)
+        if start_frame + clip_length > max_frames:
+            print(f"Warning: Requested range ({start_frame} to {start_frame + clip_length - 1}) exceeds max_frames ({max_frames}). Clipping to available frames.")
+            frame_range = range(start_frame, min(start_frame + clip_length, max_frames))
+    else:
+        total_frames = max_frames
+        frame_range = range(total_frames)  # default: 0 to max_frames - 1
+    
+    print(f"Rendering frames: {frame_range.start} to {frame_range.stop - 1} (total: {len(frame_range)})")
+
     # 2. Pygame 및 OpenGL 초기화 (화면 없는 모드)
     pygame.init()
     size = (WINDOW_WIDTH, WINDOW_HEIGHT)
@@ -111,11 +126,10 @@ def encode(bvh_paths, output_filename="rendering/output.mp4", trajectory=None):
     camera_center = glm.vec3(0, 80, 0)
     camera_up = glm.vec3(0, 1, 0)
 
-    # 5. 프레임별 렌더링 루프
+    # 5. 프레임별 렌더링 루프 (하드코딩 대신 동적 frame_range 사용)
     recorded_frames = []
-    total_frames = max_frames  # 총 프레임: 가장 긴 모션 기준
-
-    for frame_idx in range(1200, 1380):
+    first_kin = None
+    for idx, frame_idx in enumerate(frame_range):  # enumerate로 진행률 계산용 idx
         glBindFramebuffer(GL_FRAMEBUFFER, fbo)
         
         glViewport(0, 0, *size)
@@ -136,12 +150,25 @@ def encode(bvh_paths, output_filename="rendering/output.mp4", trajectory=None):
         
         # 각 모션 렌더링 (뷰어처럼 motions 루프)
         for motion_entry in motions:
-            # 프레임 적용 (루프: frame_idx % frame_len)
+            # 프레임 적용 (frame_idx를 사용: BVH의 실제 인덱스)
             local_idx = frame_idx % motion_entry['frame_len']
             motion_entry['motion'].apply_to_skeleton(local_idx, motion_entry['root'])
+
+            # 전체 kinematics 행렬 가져오기
+            global_kinematics = np.array(motion_entry['root'].kinematics)
+
+            if first_kin is None:
+                first_kin = global_kinematics.copy()
+                motion_entry['root'].kinematics = glm.mat4(1.0)
+            else:
+                # 첫 번째 프레임 기준으로 상대화
+                first_inv = np.linalg.inv(first_kin)
+                relative_kinematics = first_inv @ global_kinematics
             
+                # GLM으로 적용
+                motion_entry['root'].kinematics = glm.mat4(*relative_kinematics.T.flatten())
+
             # 휴머노이드 그리기
-            
             draw_humanoid(motion_entry['root'], motion_entry['color'])
             
             # virtual root axis 그리기 (뷰어 느낌 반영)
@@ -158,7 +185,8 @@ def encode(bvh_paths, output_filename="rendering/output.mp4", trajectory=None):
 
         glBindFramebuffer(GL_FRAMEBUFFER, 0)
         
-        print(f"\r렌더링 진행률: {frame_idx + 1} / {total_frames}", end="")
+        # 진행률 출력 (idx로 1부터 시작)
+        print(f"\r렌더링 진행률: {idx + 1} / {len(frame_range)} (frame {frame_idx})", end="")
 
     # 6. 리소스 정리 및 동영상 저장
     glDeleteRenderbuffers(1, [rbo])
@@ -175,6 +203,8 @@ if __name__ == "__main__":
     parser.add_argument('--path', nargs='+', required=True, help="BVH 파일 경로(들). 여러 개 지정 가능.")
     parser.add_argument('--output', default="rendering/output.mp4", help="출력 MP4 파일명 (default: rendering/output.mp4)")
     parser.add_argument('--trajectory', default=None, help="Trajectory 데이터 파일 경로 (optional)")
+    parser.add_argument('--start_frame', type=int, default=0, help="렌더링 시작 프레임 (default: 0)")
+    parser.add_argument('--clip_length', type=int, default=None, help="렌더링할 프레임 길이 (default: None, 전체 프레임 사용)")
 
     args = parser.parse_args()
 
@@ -186,4 +216,4 @@ if __name__ == "__main__":
         trajectory_data = torch.load(args.trajectory)  # placeholder: 실제 데이터 로드 코드 추가
         
 
-    encode(args.path, args.output, trajectory=trajectory_data)
+    encode(args.path, args.output, trajectory=trajectory_data, start_frame=args.start_frame, clip_length=args.clip_length)

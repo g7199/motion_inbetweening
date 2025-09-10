@@ -337,7 +337,7 @@ class TrajectoryDrawer:
         
         # 정보 표시
         info_y = 50
-        yaw_deg = math.degrees(self.theta)
+        yaw_deg = -math.degrees(self.theta)
         info_texts = [
             f"Pos: ({self.position[0]:.1f}, {self.position[1]:.1f})",
             f"Yaw: {yaw_deg:.1f}°",

@@ -31,7 +31,6 @@ class MotionClipDataset(Dataset):
         self.std = std
         self.mean_vel = self.mean[:3]  # [2] – velocity 부분 mean
         self.std_vel = self.std[:3]    # [2] – velocity 부분 std
-
         self.motion_cache = {}
 
         print("Scanning files and creating clip index...")

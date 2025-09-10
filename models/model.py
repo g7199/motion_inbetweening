@@ -61,8 +61,8 @@ class MotionTransformer(nn.Module):
         )
         self.seqTransEncoder = nn.TransformerEncoder(enc_layer, num_layers=self.num_layers)
 
-        # === 수정: input_proj input = feature_dim + 3 (raw concat 후 proj)
-        self.input_proj = nn.Linear(self.feature_dim + 3, self.latent_dim)  # 215 -> 256
+        # === 수정: input_proj input = 1 + feature_dim + 3 (raw concat 후 proj)
+        self.input_proj = nn.Linear(1 + self.feature_dim + 3, self.latent_dim)  # 215 -> 256
         self.output_proj = nn.Linear(self.extended_dim, self.feature_dim)  # 256 -> 212
 
         # 가중치 초기화
@@ -83,7 +83,7 @@ class MotionTransformer(nn.Module):
 
         self.pos_enc = PositionalEncoding(d_model=self.extended_dim, dropout=self.dropout, max_len=self.max_len + 1)  # d_model=256
 
-    def forward(self, x, con, t, force_unconditional=False):
+    def forward(self, x, con, posed_data, posed_indices, t, force_unconditional=False):
         # x: [B, T, F], con: [B, T, 3], t: [B]
         B, T, F = x.shape
         device = x.device
@@ -98,9 +98,27 @@ class MotionTransformer(nn.Module):
             mask = mask.unsqueeze(1).unsqueeze(2).expand_as(con)  # [B, T, 3]로 expand
             con = con * (~mask).float()  # uncond 배치 con=0
 
-        x = x.permute(1, 0, 2)  # [T, B, F]
+        # posed_data로 해당 인덱스 위치 대체
+        x_modified = x.clone()
+        if posed_data is not None and posed_indices is not None:
+            posed_data = posed_data.to(device)
+            # 배치별로 개별 처리 (posed_indices는 [B, num_posed] 형태)
+            for b in range(B):
+                x_modified[b, posed_indices[b]] = posed_data[b]
+
+        # 포즈가 적용된 위치를 나타내는 마스크 생성
+        pose_mask = torch.zeros(B, T, 1, device=device)  # [B, T, 1]
+        if posed_indices is not None:
+            # 배치별로 마스크 설정
+            for b in range(B):
+                pose_mask[b, posed_indices[b], 0] = 1.0  # 포즈가 적용된 위치는 1
+        
+        # x 맨 앞에 포즈 마스크 추가
+        x_with_mask = torch.cat([pose_mask, x_modified], dim=2)  # [B, T, 1 + F]
+
+        x_with_mask = x_with_mask.permute(1, 0, 2)  # [T, B, 1 + F]
         con = con.permute(1, 0, 2)  # [T, B, 3]
-        x_emb = torch.cat([x, con], dim=2)  # [T, B, F + 3 = 215]
+        x_emb = torch.cat([x_with_mask, con], dim=2)  # [T, B, 1 + F + 3]
         x_emb = self.input_proj(x_emb)  # [T, B, D=256]
 
         t_sin = timestep_embedding(t, self.latent_dim)
@@ -119,21 +137,20 @@ class MotionTransformer(nn.Module):
         
         return predicted_noise
     
-    def cfg_forward(self, x, con, t, guidance_scale=1.0):
-        """Classifier-Free Guidance forward pass"""
+    def cfg_forward(self, x, con, posed_data, posed_indices, t, guidance_scale=1.0):
         if guidance_scale == 1.0:
-            return self.forward(x, con, t)
+            return self.forward(x, con, posed_data, posed_indices, t)
         
         original_training = self.training
         self.eval()  # 항상 eval 모드로 (dropout off, etc.)
         
         if self.training:
-            cond_noise = self.forward(x, con, t, force_unconditional=False)
-            uncond_noise = self.forward(x, con, t, force_unconditional=True)
+            cond_noise = self.forward(x, con, posed_data, posed_indices, t, force_unconditional=False)
+            uncond_noise = self.forward(x, con, posed_data, posed_indices, t, force_unconditional=True)
         else:
             with torch.no_grad():
-                cond_noise = self.forward(x, con, t, force_unconditional=False)
-                uncond_noise = self.forward(x, con, t, force_unconditional=True)
+                cond_noise = self.forward(x, con, posed_data, posed_indices, t, force_unconditional=False)
+                uncond_noise = self.forward(x, con, posed_data, posed_indices, t, force_unconditional=True)
         
         guided_noise = uncond_noise + guidance_scale * (cond_noise - uncond_noise)
         

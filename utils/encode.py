@@ -50,13 +50,10 @@ def save_video(frames, filename, fps):
             writer.append_data(frame)
     print(f"🎥 동영상이 {filename} 으로 성공적으로 저장되었습니다!")
 
-
-# ==============================================================================
-#  ↓↓↓ 요청하신 encode() 함수 ↓↓↓
-# ==============================================================================
 def encode(root, all_frames_data,
            trajectory=None, traj_mean=None, traj_std=None,
-           positions=None,  pos_mean=None, pos_std=None,
+           positions=None, pos_mean=None, pos_std=None,
+           original_positions=None,  # 원본 positions 추가
            output_filename="rendering/output.mp4"):
     
     # 2. Pygame 및 OpenGL 초기화 (화면 없는 모드)
@@ -97,16 +94,27 @@ def encode(root, all_frames_data,
                   camera_center.x, camera_center.y, camera_center.z,
                   camera_up.x, camera_up.y, camera_up.z)
         draw_axes()
+        
         if trajectory is not None:
-            # sample_motion_while_training에서 호출할 때
             draw_trajectory(trajectory[:, :2], traj_mean[:2], traj_std[:2])
 
-        if positions is not None:
-            cur_pos_frame = positions[frame_idx]   # [J, 3]
+        # 생성된 positions 그리기 (초록색)
+        # if positions is not None:
+        #     cur_pos_frame = positions[frame_idx]   # [J, 3]
+        #     draw_positions_points_frame(
+        #         positions_frame=cur_pos_frame,
+        #         pos_mean=None, pos_std=None,  # 이미 실제 좌표이므로 정규화 불필요
+        #         point_size=3.0, color=(0.0, 1.0, 0.0),  # 초록색
+        #         use_sphere=False, sphere_radius=2.5
+        #     )
+
+        # 원본 positions 그리기 (빨간색) - 비교용
+        if original_positions is not None:
+            cur_orig_frame = original_positions[frame_idx]   # [J, 3]
             draw_positions_points_frame(
-                positions_frame=cur_pos_frame,
-                pos_mean=pos_mean, pos_std=pos_std,
-                point_size=3.0, color=(0.0, 1.0, 0.0),
+                positions_frame=cur_orig_frame,
+                pos_mean=None, pos_std=None,
+                point_size=10.0, color=(0.0, 1.0, 0.0),  # 빨간색
                 use_sphere=False, sphere_radius=2.5
             )
             

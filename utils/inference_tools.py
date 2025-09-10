@@ -210,3 +210,25 @@ def frames_to_bvh(root, all_frames_data, output_filename="debug_output.bvh", tem
         import traceback
         traceback.print_exc()
         return None
+    
+
+def get_joint_positions_dfs(joint, position_list, cur_pos=np.zeros(3), cur_rot=np.eye(3), is_root=True):
+    """
+    DFS로 각 joint의 global position을 순서대로 추출
+    """
+    T = np.array(joint.kinematics)   # [4,4] 로컬 변환 행렬
+    R_local = T[:3, :3]
+    p_local = T[:3, 3]
+
+    # 부모 좌표계에서 현재 joint의 global position 계산
+    p_global = cur_rot @ p_local + cur_pos
+    R_global = cur_rot @ R_local
+
+    position_list.append(p_global.copy())
+
+    # 자식 joint들 재귀 처리
+    for child in joint.children:
+        get_joint_positions_dfs(child, position_list, p_global, R_global, is_root=False)
+
+# 실제 사용:
+# positions = extract_positions_from_bvh("your_file.bvh", frame_idx=0)

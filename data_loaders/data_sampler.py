@@ -40,6 +40,16 @@ def get_kinematics_dfs(joint, result_list, posis_list, relative_posis_list, cont
         get_kinematics_dfs(child, result_list, posis_list, relative_posis_list, contact_list,
                           prev_foot_positions, dt, p_global, R_global, 
                           include_pos=include_pos, is_root=False)
+        
+def sample_data_with_endpoints(data, ratio):
+   
+   total_length = len(data)
+   target_count = max(2, int(total_length * ratio))  # 최소 2개 (첫번째, 마지막)
+   
+   indices = np.linspace(0, total_length - 1, target_count, dtype=int)
+   sampled_data = data[indices]
+   
+   return sampled_data, indices
 
 
 def get_data(motion, virtual_root, time_size=180, start_frame=0, include_pos=True, 
